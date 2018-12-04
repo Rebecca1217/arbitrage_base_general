@@ -1,31 +1,40 @@
 cd E:\Repository\arbitrage_base_general
-addpath public newSystem3.0\gen_for_BT2 newSystem3.0 usual_function 
+addpath public newSystem3.0\gen_for_BT2 newSystem3.0 usual_function
 
 % 从J JM扩展到通用型两个品种
 % 以MA-PP为例 PP - 3 * MA - 800
 
 
-dateBegin = 20130302; % 训练
-dateEnd = 20170929; % 训练 % c_edD必须是交易日，不然totaldate里面定位不到
-% dateBegin = 20170701; % 验证
-% dateEnd = 20180330; % 验证
-% dateBegin = 20180101; % 测试
-% dateEnd = 20181029; % 测试
 
 % 交易参数
 paraM.rate = 1 / 3; %%这个rate一定要注意。。不要随便改成1.35！改的话calOpenHands一定要跟着改！！每次结果要检查一下手数比对不对！！
 paraM.fixedExpense = 800;
-% seq =  100 : 100 : 1500;
 
-% testRes = nan(13, 21);
-% testRegressR2 = nan(3, 50);
-% seq = 910 : 1 : 930; % interval取500以下收益回撤比都是负的, 1000效果最好但不稳健
-% for iTest = 1 : 21
+% testRes = nan(13, 5);
+% % testRegressR2 = nan(3, 50);
+% seq = [20130302 20170929;...
+%     20140101 20141231;...
+%     20150101 20151231;...
+%     20160101 20161230;...
+%     20170101 20170929];
+% for iTest = 1 : 5
 
+dateBegin = 20130302;
+dateEnd = 20170929;
+% dateBegin = seq(iTest, 1); % 训练
+% dateEnd = seq(iTest, 2); % 训练 % c_edD必须是交易日，不然totaldate里面定位不到
+% dateBegin = 20170701; % 验证
+% dateEnd = 20180330; % 验证
+% dateBegin = 20180101; % 测试
+% dateEnd = 20181029; % 测试
+   
+    
+paraM.hgChg = -300; % 效果好的很好，但是很不稳定, 600~ -100都还可以，其中-200不好, -100 和 -300 最好
 %%%%%%%%%%%%%%%%3个关键参数：%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % paraM.proportion = 0.98; % MA与预测利润加权平均，MA所占的比例
 % paraM.xMA = 12; % MA天数
-paraM.interval = 920;
+paraM.interval = 1020; % 测试700~1400OK，1020~1160效果最好，
+paraM.lagDays = 30; % 24-32效果最好，暂定取30
 %%%%%%%%%%%%%%%%3个关键参数 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 lossRatio = 0.5; % 止损上限
 % alpha = 0.35; % 回归系数的置信区间 1 - α
@@ -36,27 +45,54 @@ lossRatio = 0.5; % 止损上限
 %% 取回测期全部交易日
 
 load Z:\baseData\Tdays\future\Tdays_dly.mat
-totalDate = Tdays(Tdays(:, 1) >= dateBegin & Tdays(:, 1) <= dateEnd, 1);
+% totalDate = Tdays(Tdays(:, 1) >= dateBegin & Tdays(:, 1) <= dateEnd, 1);
+totalDate = Tdays(Tdays(:, 1) <= dateEnd, 1); % 分段测试用，避免前面有空值
 
-% 现货利润数据搞一个函数，其中各序列价格设为子函数，最终输出现货利润Y序列
+% 现货利润数据搞一个函数，其中各序列价格设为子函数，最终输出现货利润Y序列 现货利润数据在模型没用，只是画出来看看
 %% 模拟现货利润数据
 
-% 焦炭现货价格：车板价
 w = windmatlab;
-profit = getSpotProfit(dateBegin, dateEnd, paraM);
-productionPPYoY = getSpotPrice('S0027180', dateBegin, dateEnd, 'ProductYoYPP', 'mean');
-harborStoreMA = getSpotPrice('S5436526,S5436527', dateBegin, dateEnd, 'HarborStoreMA', 'sum');
+% profit = getSpotProfit(dateBegin, dateEnd, paraM); %
+% 后面没有再用到现货利润数据了，只是前期画图用
+productionPPYoY = getSpotPrice('S0027180', 20130302, dateEnd, 'ProductYoYPP', 'mean'); % PP开工率当月同比
+harborStoreMA = getSpotPrice('S5436526,S5436527', 20130302, dateEnd, 'HarborStoreMA', 'sum'); % MA港口库存
+%2018.11.30 这里MA港口库存再加一个变量是进口数量，加起来作为甲醇供给量（变量到底怎么选，再研究一下）
+%@2018.12.3harborStoreMA 改为周度环比增长率
+harborStoreMA = getWoW(harborStoreMA, 'weekly');
+harborStoreMA = table(harborStoreMA.Date, harborStoreMA.WoW, 'VariableNames', {'Date', 'HarborStoreMA'});
 
-spotData = outerjoin(profit, productionPPYoY, 'type', 'left', 'MergeKeys', true);
+% 读取宏观PMI
+pmi = getSpotPrice('M0017126', 20130302, dateEnd, 'PMI', 'mean');
+% pmi假定每月滞后8个工作日公布
+% 
+
+% get impMAPrice，美元计价，需乘以汇率
+impMAPrice = getSpotPrice('S5416976', 20130302, dateEnd, 'ImpMAPrice', 'mean');  % MA进口价格:美元
+exUSDCNY = getSpotPrice('M0000185', 20130302, dateEnd, 'USDCNY', 'mean');
+impMAPrice = outerjoin(impMAPrice, exUSDCNY, 'type', 'left', 'MergeKeys', true);
+impMAPrice.USDCNY = fillmissing(impMAPrice.USDCNY, 'previous');
+impMAPrice.ImpMAPrice = impMAPrice.ImpMAPrice .* impMAPrice.USDCNY;
+impMAPrice.USDCNY = [];
+
+% @2018.12.3 impMAPrice先改为周度环比试一下
+impMAPrice = getWoW(impMAPrice, 'daily');
+impMAPrice = table(impMAPrice.Date, impMAPrice.WoW, 'VariableNames', {'Date', 'ImpMAPrice'});
+
+spotData = outerjoin(table(totalDate, 'VariableNames', {'Date'}), productionPPYoY, 'type', 'left', 'MergeKeys', true);
 spotData = outerjoin(spotData, harborStoreMA, 'type', 'left', 'MergeKeys', true);
+spotData = outerjoin(spotData, impMAPrice, 'type', 'left', 'MergeKeys', true);
+spotData = outerjoin(spotData, pmi, 'type', 'left', 'MergeKeys', true);
 
 spotData.ProductYoYPP = fillmissing(spotData.ProductYoYPP, 'previous');
 spotData.HarborStoreMA = fillmissing(spotData.HarborStoreMA, 'previous');
+spotData.ImpMAPrice = fillmissing(spotData.ImpMAPrice, 'previous');
+spotData.PMI = fillmissing(spotData.PMI, 'previous');
 
 % 剔除缺失值
 spotData = spotData(all(~isnan(table2array(spotData)), 2), :);
-spotData.Ratio = spotData.ProductYoYPP ./ spotData.HarborStoreMA; % 这个Ratio直接除有量纲问题。。需要调整
+% spotData.Ratio = spotData.ProductYoYPP ./ spotData.HarborStoreMA; % 这个Ratio直接除有量纲问题。。需要调整
 
+% spotData = spotData(spotData.Date >= dateBegin & spotData.Date <= dateEnd, :);
 
 
 
@@ -104,7 +140,7 @@ for i_pair = 1:size(fut_variety,1)
     contM1 = cont_multi{ismember(cont_multi(:,1),pFut1),2};
     contM2 = cont_multi{ismember(cont_multi(:,1),pFut2),2};
     
-      % 导入换月日数据
+    % 导入换月日数据
     load(['\\Cj-lmxue-dt\期货数据2.0\code2.0\data20_pair_data\chgInfo\',pFut2,'_',pFut1,'.mat'])
     chgInfo = chgInfo(chgInfo.date>stDate & chgInfo.date<=edDate,:);
     
@@ -128,53 +164,64 @@ for i_pair = 1:size(fut_variety,1)
         % 导入数据
         data1 = getData([dataPath,'\',pFut1,'\',cont1{1},'.mat'],edDate);
         data2 = getData([dataPath,'\',pFut2,'\',cont2{1},'.mat'],edDate);
-
+        
         spreadData1 = table(data1.date, data1.close, 'VariableNames', {'Date', 'Close1'});
         spreadData2 = table(data2.date, data2.close, 'VariableNames', {'Date', 'Close2'});
         spread = outerjoin(spreadData1, spreadData2, 'type', 'left', 'MergeKeys', true);
         spread.Spread = spread.Close1 - 1 / paraM.rate * spread.Close2 - paraM.fixedExpense;
-%         tstData = vertcat(tstData, resSignal(resSignal.Date >= c_stD & resSignal.Date <= c_edD, :));
+        %         tstData = vertcat(tstData, resSignal(resSignal.Date >= c_stD & resSignal.Date <= c_edD, :));
         spread = outerjoin(spread, spotData, 'type', 'left', 'MergeKeys', true);
-%         realSpread = table(spread.Date, (spread.Spread  +  spread.Profit) / 2, 'VariableNames', {'Date', 'RealSpread'});
-        realSpread = arrayfun(@(x) getRealSpread(x), spread.Ratio(1:30));
-        keySpread = mode(realSpread);
-        realSpread = [nan(30, 1); ones(size(spread, 1) - 30, 1) .* keySpread];
+        %         realSpread = table(spread.Date, (spread.Spread  +  spread.Profit) / 2, 'VariableNames', {'Date', 'RealSpread'});
+        
+        realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(1 : paraM.lagDays, 5:8)));
+        % rowfun输入的function参数必须一一对应，不能括号里显示只有一个参数，实际输入有两列，不行
+        keySpread = mode(realSpread); % 取前paraM.lagDays天给出利润中枢的众数作为接下来的base中枢
+        realSpread = [nan(paraM.lagDays, 1); ones(size(spread, 1) - paraM.lagDays, 1) .* keySpread];
         realSpread = table(spread.Date, realSpread, 'VariableNames', {'Date', 'RealSpread'});
         [sigOpen, sigClose, resSignal] = getSignal(data1, data2, realSpread, paraM);
         sig = [sigOpen,sigClose];
-
+        
         if c < height(chgInfo)
-        catSpread = spread(spread.Date >= chgInfo.date(c) & spread.Date < chgInfo.date(c + 1), :);
+            catSpread = spread(spread.Date >= chgInfo.date(c) & spread.Date < chgInfo.date(c + 1), :);
         else
             catSpread = spread(spread.Date >= chgInfo.date(c), :);
         end
         tstData = vertcat(tstData, catSpread);
         
-        subplot(3, 4, c)
-%         plot(datenum(num2str(spread.Date), 'yyyymmdd'), spread.Spread, 'DisplayName', '期货') % 实际期货价差:蓝线 
-        plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.Spread)        
+        subplot(3, 5, c)
+        plot(datenum(num2str(spread.Date), 'yyyymmdd'), spread.Spread, 'DisplayName', '期货') % 实际期货价差:蓝线
+        %         yyaxis left
+        plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.Spread)
         title(data1.fut(1))
         hold on
+        % %        plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.Close1) % PP
+        % %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.Close2) % MA
         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.RealSpread) % 中枢
         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadUp) % 上轨
         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadDown) % 下轨
+        
         if c == 1
-        legend('期货', '中枢', '上轨', '下轨', 'Location', 'best')
+            legend('期货', '中枢', '上轨', '下轨', 'Location', 'best')
         end
-%      
-% 
-%         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadUp)
-%         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadDown)
-% %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YHat) % 拟合Y
-%         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YReal) % 真实Y，利润，现货-现货， 红线
-%        
-% %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YReal + interval)
-% %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YReal - interval)
-% %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.JichaDiff) % 黄线
-% %          plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadTheory) % nLag天后的真实利润 + 基差的差（理想中的蓝线:紫线）
         datetick('x', 'yyyymmdd', 'keepticks', 'keeplimits')
         
-      
+        %             %         yyaxis right
+        %             %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), spread.Ratio) % Ratio
+        %             %         ylim([-0.2, 0.8])
+        %
+        %
+        %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadUp)
+        %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadDown)
+        % %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YHat) % 拟合Y
+        %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YReal) % 真实Y，利润，现货-现货， 红线
+        %
+        % %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YReal + interval)
+        % %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.YReal - interval)
+        % %         plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.JichaDiff) % 黄线
+        % %          plot(datenum(num2str(resSignal.Date), 'yyyymmdd'), resSignal.SpreadTheory) % nLag天后的真实利润 + 基差的差（理想中的蓝线:紫线）
+        
+        
+        
         
         % 以下为止损部分
         % 可以理解为对pureSig的一个修正，需要止损的部分就直接把持仓信号和手数改为0，并把持续几天不开仓都改为0即可（先没动）
@@ -198,15 +245,17 @@ for i_pair = 1:size(fut_variety,1)
     end
     
     
-%         plot(datenum(num2str(tstData.Date), 'yyyymmdd'), tstData.Spread)
-%         hold on
-%         plot(datenum(num2str(tstData.Date), 'yyyymmdd'), tstData.Profit)
-%         legend('期货', '现货', 'Location', 'best')
-%         datetick('x', 'yyyymmdd', 'keepticks', 'keeplimits')
-
+    %         plot(datenum(num2str(tstData.Date), 'yyyymmdd'), tstData.Spread)
+    %         hold on
+    %         plot(datenum(num2str(tstData.Date), 'yyyymmdd'), tstData.Profit)
+    %         legend('期货', '现货', 'Location', 'best')
+    %         datetick('x', 'yyyymmdd', 'keepticks', 'keeplimits')
+    
 end
 
 
+
+res = res(res.Date >= dateBegin, :);
 targetPortfolio = num2cell(NaN(size(res, 1), 2));   %分配内存
 for iDate = 1:size(res, 1)
     hands = {char(res(iDate, :).Cont1), res(iDate, :).Hands1;...
@@ -217,9 +266,9 @@ end
 
 % % getholdinghands部分不涉及换月日，因为是每段循环的，本部分内没有合约换月
 % % 但是合约换月日要用于输入回测平台数据部分adjFactor
-% 
-% 
-% 
+%
+%
+%
 % TradePara用于输入回测平台
 TradePara.futDataPath = '\\Cj-lmxue-dt\期货数据2.0\dlyData\主力合约'; %期货主力合约数据路径
 TradePara.futUnitPath = '\\Cj-lmxue-dt\期货数据2.0\usualData\minTickInfo.mat'; %期货最小变动单位
@@ -236,18 +285,23 @@ TradePara.PType = 'open'; %交易价格，一般用open（开盘价）或者avg(日均价）
 
 [BacktestResult,err] = CTABacktest_GeneralPlatform_3(targetPortfolio,TradePara);
 
-
+% subplot(2, 3, iTest)
 figure
 % 净值曲线
 dn = datenum(num2str(BacktestResult.nv(:, 1)), 'yyyymmdd');
 plot(dn, (oriAsset + BacktestResult.nv(:, 2)) ./ oriAsset)
-datetick('x', 'yyyymmdd', 'keeplimits')
+datetick('x', 'yyyymmdd', 'keepticks', 'keeplimits')
 
 BacktestAnalysis = CTAAnalysis_GeneralPlatform_2(BacktestResult);
 % testRes(:, iTest) = cellfun(@(x) double(x), BacktestAnalysis(:, 2));
-% testRegressR2(:, iTest) = mean(regressR2, 'omitnan')';
+% % testRegressR2(:, iTest) = mean(regressR2, 'omitnan')';
 % end
-% plot(datenum(num2str(tstData.Date), 'yyyymmdd'), tstData.Spread - 150) % 真实Y，利润，现货-现货， 红线
+% % plot(datenum(num2str(tstData.Date), 'yyyymmdd'), tstData.Spread - 150) % 真实Y，利润，现货-现货， 红线
 % hold on
 % plot(datenum(num2str(tstData.Date), 'yyyymmdd'), tstData.YReal) % 真实Y，利润，现货-现货， 红线
 % datetick('x', 'yyyymmdd', 'keepticks', 'keeplimits')
+%
+%
+% tst = table(spread.Date, spread.Close1, spread.Close2, spread.Spread, realSpread.RealSpread, realSpread.RealSpread - paraM.interval, realSpread.RealSpread + paraM.interval, ...
+%     spread.ProductYoYPP, spread.HarborStoreMA, spread.ImpMAPrice, ...
+%     'VariableNames', {'Date', 'PP', 'MA', 'Spread', 'RealSpread', 'RealDown', 'RealUp', 'ProductYoYPP', 'HarborStoreMA', 'ImpMAPrice'});

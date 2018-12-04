@@ -6,7 +6,7 @@ function [sigLi] = pureSig1(sig)
 
 % 加入止损以后需要把这个再调整一下，在遇到平仓信号之前的开仓信号都不要越过去，保留比如38 42  40 42这样的嵌套配对
 % @2018.09.27 调整信号，如果开仓日遇到跳价则排除本段信号
-lines = evalin('base', 'lines');
+% lines = evalin('base', 'lines');
 
 % 开平仓信号
 sigOp = sig(:,1);

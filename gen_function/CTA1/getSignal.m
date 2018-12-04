@@ -67,7 +67,13 @@ sigC = zeros(size(resSignal, 1), 1);
 L = spreadBF1 < spreadDownBF1 & resSignal.Spread > resSignal.SpreadDown; % Spread向上突破SpreadDown
 CL = (spreadBF1 > spreadDownBF1 & resSignal.Spread < resSignal.SpreadDown) | (...
     spreadBF1 < realSpreadBF1 & resSignal.Spread > resSignal.RealSpread); % Spread反向下止损或者Spread向上突破yHat平仓
-
+% @2018.12.3 加个出场条件，多头信号，连续2天回撤，并且当前已经＜=过去4天（不含今天）所有值，则出场
+% spread = resSignal.Spread;
+% spreadBF2 = [NaN; spreadBF1(1 : end - 1)];
+% spreadBF3 = [NaN; spreadBF2(1 : end - 1)];
+% spreadBF4 = [NaN; spreadBF3(1 : end - 1)];
+% CL2 = spread <= spreadBF1 & spreadBF1 <= spreadBF2 & spread <= spreadBF3 & spread <= spreadBF4;
+% CL = CL1 | CL2;
 % L = resSignal.Spread < 0 & spreadBF1 < resSignal.Spread;
 % CL = spreadBF1 > resSignal.Spread;
 
@@ -75,6 +81,9 @@ CL = (spreadBF1 > spreadDownBF1 & resSignal.Spread < resSignal.SpreadDown) | (..
 S = spreadBF1 > spreadUpBF1 & resSignal.Spread < resSignal.SpreadUp; % Spread 向下突破SpreadUp
 CS = (spreadBF1 < spreadUpBF1 & resSignal.Spread > resSignal.SpreadUp) | (...
     spreadBF1 > realSpreadBF1 & resSignal.Spread < resSignal.RealSpread); % Spread反向上止损或者Spread向下突破YHat平仓
+% % @2018.12.3 加个出场条件，空头信号，连续两天价格上升，且当天已经>=过去4天（不含今天）所有值，则出场
+% CS2 = spread >= spreadBF1 & spreadBF1 >= spreadBF2 & spread >= spreadBF3 & spread >= spreadBF4;
+% CS = CS1 | CS2;
 
 sigO(L) = 1;
 sigO(S) = -1;
