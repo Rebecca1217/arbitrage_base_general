@@ -1,17 +1,13 @@
-function resWoW = getWoW(datatable, type)
+function resWoW = getWoW(datatable, dataFreq)
 %GETWOW datatable是输入的数据，第一列为日期（全部交易日），第二列为原始数据，type表示原始数据的频率，
-% type = 'weekly'，则数据类型是周度，中间空值，计算为除以上一个非空数值 - 1，再补齐空值；
-% type = 'daily'，则数据类型是日度，先加上星期标记，再滚动除以上一个同星期的数值 - 1.
+% type = 'weekly'，则数据类型是周度，计算为除以上一个非空数值 - 1;不要这么做！看着简单其实都是坑
+% 处理起来很麻烦因为数据质量很差 有的周四，有的周五，有的周日？，还有的同一周既有周四又有周五。。。
+% 修改为周度数据先outerjoin到totalDate上补成日度数据，然后按照日度数据的方式处理
+% type = 'daily'，则数据类型是日度，先加上星期标记，再滚动除以上一个同星期的数值 - 1。在此基础上修正间隔超过5个交易日情况
 
-if strcmp(type, 'weekly')
-    % 原始数据频率是周度
-    nNaN = ~isnan(table2array(datatable(:, 2)));
-    idx = find(nNaN, size(datatable, 1)); % 非空数值的index
-    originalData = table2array(datatable(:, 2));
-    res = NaN(size(originalData, 1), 1);
-    resPure = originalData(idx(2:end)) ./ originalData(idx(1:end-1)) - 1;
-    res(idx(2:end)) = resPure;
-elseif strcmp(type, 'daily')
+totalDate = evalin('base', 'totalDate');
+totalDate = table(totalDate, 'VariableNames', {'Date'});
+if  strcmp(dataFreq, 'daily')
     % 原始数据频率是日度
     datatable(:, 3) = table(weekday(datenum(num2str(table2array(datatable(:, 1))), 'yyyymmdd'), 'yyyymmdd'));  % 加上星期标签
     % 第3列表示一周的第几天，第一天是周日
@@ -34,7 +30,9 @@ elseif strcmp(type, 'daily')
         resPureAdj = originalData(adjIdxValue) ./ originalData(adjIdxValue - 5) - 1;
         resPure(adjIdxExtract - 1) = resPureAdj;
         res(idx(2:end)) = resPure;
-    end   
+    end
+else
+    error('Only support daily data! Suggest using fillToDaily First!')
 end
 res = fillmissing(res, 'previous');
 datatable(:, 3) = table(res);

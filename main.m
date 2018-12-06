@@ -5,7 +5,6 @@ addpath public newSystem3.0\gen_for_BT2 newSystem3.0 usual_function
 % 以MA-PP为例 PP - 3 * MA - 800
 
 
-
 % 交易参数
 paraM.rate = 1 / 3; %%这个rate一定要注意。。不要随便改成1.35！改的话calOpenHands一定要跟着改！！每次结果要检查一下手数比对不对！！
 paraM.fixedExpense = 800;
@@ -54,25 +53,38 @@ totalDate = Tdays(Tdays(:, 1) <= dateEnd, 1); % 分段测试用，避免前面有空值
 w = windmatlab;
 % profit = getSpotProfit(dateBegin, dateEnd, paraM); %
 % 后面没有再用到现货利润数据了，只是前期画图用
+% @12.4 这里获取现货数据，先都填充为日度fillToDaily，再计算周环比或者年同比等getWoW getYoY；
 productionPPYoY = getSpotPrice('S0027180', 20130302, dateEnd, 'ProductYoYPP', 'mean'); % PP开工率当月同比
+productionPPYoY = fillToDaily(productionPPYoY, totalDate, 1); % 填充为日度数据，滞后调整1个工作日
+% productionPPYoY 已经是同比数据，不需要再计算增长率
+
 harborStoreMA = getSpotPrice('S5436526,S5436527', 20130302, dateEnd, 'HarborStoreMA', 'sum'); % MA港口库存
 %2018.11.30 这里MA港口库存再加一个变量是进口数量，加起来作为甲醇供给量（变量到底怎么选，再研究一下）
 %@2018.12.3harborStoreMA 改为周度环比增长率
-harborStoreMA = getWoW(harborStoreMA, 'weekly');
+harborStoreMA = fillToDaily(harborStoreMA, totalDate, 1);
+
+% 计算WoW或者YoY
+harborStoreMA = getWoW(harborStoreMA, 'daily');
 harborStoreMA = table(harborStoreMA.Date, harborStoreMA.WoW, 'VariableNames', {'Date', 'HarborStoreMA'});
 
 % 读取宏观PMI
 pmi = getSpotPrice('M0017126', 20130302, dateEnd, 'PMI', 'mean');
-% pmi假定每月滞后8个工作日公布
+pmi = fillToDaily(pmi, totalDate, 1);
+% pmi指数一般当月月底国家统计局就公布，不知道Wind收录会不会滞后，假定滞后1个交易日
 % 
 
 % get impMAPrice，美元计价，需乘以汇率
+% 先填充为日度数据，这个价格数据不需要滞后，一般当天收盘可拿到
 impMAPrice = getSpotPrice('S5416976', 20130302, dateEnd, 'ImpMAPrice', 'mean');  % MA进口价格:美元
 exUSDCNY = getSpotPrice('M0000185', 20130302, dateEnd, 'USDCNY', 'mean');
 impMAPrice = outerjoin(impMAPrice, exUSDCNY, 'type', 'left', 'MergeKeys', true);
 impMAPrice.USDCNY = fillmissing(impMAPrice.USDCNY, 'previous');
 impMAPrice.ImpMAPrice = impMAPrice.ImpMAPrice .* impMAPrice.USDCNY;
 impMAPrice.USDCNY = [];
+
+% 2018.12.6 注意，虽然impMAPrice这个数据本身就是daily的，也要做fillToDaily操作，因为它可能确实某些交易日数据
+% 相当于每个变量自己要先填补全，再汇总到一起，因为最后汇总完没有再fillmissing了，所以要保证每个变量自己是全的，不然有缺失数据会被踢掉
+impMAPrice = fillToDaily(impMAPrice, totalDate, 0);
 
 % @2018.12.3 impMAPrice先改为周度环比试一下
 impMAPrice = getWoW(impMAPrice, 'daily');
@@ -83,20 +95,17 @@ spotData = outerjoin(spotData, harborStoreMA, 'type', 'left', 'MergeKeys', true)
 spotData = outerjoin(spotData, impMAPrice, 'type', 'left', 'MergeKeys', true);
 spotData = outerjoin(spotData, pmi, 'type', 'left', 'MergeKeys', true);
 
-spotData.ProductYoYPP = fillmissing(spotData.ProductYoYPP, 'previous');
-spotData.HarborStoreMA = fillmissing(spotData.HarborStoreMA, 'previous');
-spotData.ImpMAPrice = fillmissing(spotData.ImpMAPrice, 'previous');
-spotData.PMI = fillmissing(spotData.PMI, 'previous');
+% 每个数据自己先fillmissing了，不要等到最后，因为前面需要计算WoW或YoY
+% spotData.ProductYoYPP = fillmissing(spotData.ProductYoYPP, 'previous');
+% spotData.HarborStoreMA = fillmissing(spotData.HarborStoreMA, 'previous');
+% spotData.ImpMAPrice = fillmissing(spotData.ImpMAPrice, 'previous');
+% spotData.PMI = fillmissing(spotData.PMI, 'previous');
 
 % 剔除缺失值
 spotData = spotData(all(~isnan(table2array(spotData)), 2), :);
-% spotData.Ratio = spotData.ProductYoYPP ./ spotData.HarborStoreMA; % 这个Ratio直接除有量纲问题。。需要调整
 
 % spotData = spotData(spotData.Date >= dateBegin & spotData.Date <= dateEnd, :);
 
-
-
-%% 当天收盘价与当天真实价格比较
 
 %% 尝试以期货价差与现货价差均值作为真实价差，逻辑是，PP-MA这组，期货价差和现货价差大概率还是倾向于收敛的
 %% 真实价差有时候偏向期货，现货跟着期货走，有时候偏向现货，期货调整到现货，那中间位置的均值就是一个比较中性的状态，先试试看
@@ -171,7 +180,6 @@ for i_pair = 1:size(fut_variety,1)
         spread.Spread = spread.Close1 - 1 / paraM.rate * spread.Close2 - paraM.fixedExpense;
         %         tstData = vertcat(tstData, resSignal(resSignal.Date >= c_stD & resSignal.Date <= c_edD, :));
         spread = outerjoin(spread, spotData, 'type', 'left', 'MergeKeys', true);
-        %         realSpread = table(spread.Date, (spread.Spread  +  spread.Profit) / 2, 'VariableNames', {'Date', 'RealSpread'});
         
         realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(1 : paraM.lagDays, 5:8)));
         % rowfun输入的function参数必须一一对应，不能括号里显示只有一个参数，实际输入有两列，不行
