@@ -12,6 +12,8 @@ function resSpread = getRealSpread(x, y, z, hg)
 % @决策树的结构导致顶层变量的重要性太高，决定性作用
 % @所以改成每个变量投票的形式 这个函数暂时不能泛化，只是为了方便观看写成函数形式
 
+% @2018.12.7 这种投票结构，加变量的时候要小心，同类变量不能太多，否则相当于人为给这类变量提高了权重
+
 res = NaN(3, 1);
 if x >= 15 % PP 开工率越高，认为PP价格越低，spread应该越低
     res(1) = -1;
@@ -34,11 +36,13 @@ end
 resPlus = size(res(res == 1), 1);
 resMinus = size(res(res == -1), 1);
 
-if resPlus + resMinus ~= size(res, 1)
-    error('Please check the condition which is not complete!')
-end
+% There may be NaN at the beginning of SpotData, no need to add this restrict
+% if resPlus + resMinus ~= size(res, 1)
+%     error('Please check the condition which is not complete!')
+% end
 
-decideRatio = resPlus / size(res, 1); % 价格中枢上移的频率：
+decideRatio = resPlus / (resPlus + resMinus);
+% decideRatio = resPlus / size(res, 1); % 价格中枢上移的频率：
 % 0.8以上上移500， 0.6以上上移200； 0.4以下下移300，0.2以下下移800
 
 

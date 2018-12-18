@@ -25,7 +25,7 @@ num = size(sigLi,1);
 asset = oriAsset;
 tdList(1:sigLi(1,2),8) = asset;
 for i = 1:num %逐个信号计算
-    disp(i)
+%     disp(i)
     opL = sigLi(i,2); %开仓信号所在行
     clL = sigLi(i,3); %平仓信号所在行
     sgn1 = sigLi(i,1); %开仓方向-第一个品种的方向

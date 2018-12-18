@@ -4,21 +4,30 @@ addpath public newSystem3.0\gen_for_BT2 newSystem3.0 usual_function
 % 从J JM扩展到通用型两个品种
 % 以MA-PP为例 PP - 3 * MA - 800
 
+% @2018.12.12修改利润中枢为每天变动，目前这种思路不适合改成每天变动，否则出来会是总体平的，偶尔大起大落，不适合作为轨线
+% @2018.12.17修改利润中枢为每天判断，但只有连续10日判断中枢都发生了变动时才确定中枢变动(因为基本面上的利润中枢上下移动不是一个超短期现象)
+% @2018.12.17自变量要提前一天，用今天的自变量去预测明天的中枢
 
-% 交易参数
+% @2018.12.17另外可以人工贴标签，自动训练模型参数，人工调超参数
+
+% PP开工率同比； 甲醇港口库存每周四更新；甲醇中国主港现货价每天更新(甲醇价格在下午5点还没更新)；
+%% 交易参数
 paraM.rate = 1 / 3; %%这个rate一定要注意。。不要随便改成1.35！改的话calOpenHands一定要跟着改！！每次结果要检查一下手数比对不对！！
 paraM.fixedExpense = 800;
+paraM.continuousDay = 10;
+% PP/MA 手数 = 1 / 1.5
 
-% testRes = nan(13, 5);
+% testRes = nan(13, 21);
 % % testRegressR2 = nan(3, 50);
-% seq = [20130302 20170929;...
+% seq = [20130201 20170929;...
 %     20140101 20141231;...
 %     20150101 20151231;...
 %     20160101 20161230;...
 %     20170101 20170929];
-% for iTest = 1 : 5
+% seq = -340 : 5 : -240;
+% for iTest = 1 : 21
 
-dateBegin = 20130302;
+dateBegin = 20130201;
 dateEnd = 20170929;
 % dateBegin = seq(iTest, 1); % 训练
 % dateEnd = seq(iTest, 2); % 训练 % c_edD必须是交易日，不然totaldate里面定位不到
@@ -28,17 +37,15 @@ dateEnd = 20170929;
 % dateEnd = 20181029; % 测试
    
     
-paraM.hgChg = -300; % 效果好的很好，但是很不稳定, 600~ -100都还可以，其中-200不好, -100 和 -300 最好
 %%%%%%%%%%%%%%%%3个关键参数：%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % paraM.proportion = 0.98; % MA与预测利润加权平均，MA所占的比例
 % paraM.xMA = 12; % MA天数
-paraM.interval = 1020; % 测试700~1400OK，1020~1160效果最好，
-paraM.lagDays = 30; % 24-32效果最好，暂定取30
+paraM.hgChg = -300; % -340~-240结果都还可以, -260效果最好，但是不确定是否稳定
+% 宏观条件变化应有上浮和下浮两种情况啊（上有顶，下有底）
+paraM.interval = 1100; % 测试700~1400OK，1020~1160效果最好，
+paraM.lagDays = 30; % 24-32效果最好，暂定取30;多种方式测下来，每一种30都表现比较好
 %%%%%%%%%%%%%%%%3个关键参数 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 lossRatio = 0.5; % 止损上限
-% alpha = 0.35; % 回归系数的置信区间 1 - α
-
-% nLag= 10; % nLag取10以上的话会导致realY明显提前于Spread，9-10左右二者比较同步
 
 
 %% 取回测期全部交易日
@@ -47,18 +54,46 @@ load Z:\baseData\Tdays\future\Tdays_dly.mat
 % totalDate = Tdays(Tdays(:, 1) >= dateBegin & Tdays(:, 1) <= dateEnd, 1);
 totalDate = Tdays(Tdays(:, 1) <= dateEnd, 1); % 分段测试用，避免前面有空值
 
-% 现货利润数据搞一个函数，其中各序列价格设为子函数，最终输出现货利润Y序列 现货利润数据在模型没用，只是画出来看看
 %% 模拟现货利润数据
 
 w = windmatlab;
-% profit = getSpotProfit(dateBegin, dateEnd, paraM); %
+% 现货利润数据搞一个函数，其中各序列价格设为子函数，最终输出现货利润Y序列 现货利润数据在模型没用，只是画出来看看
+% profit = getSpotProfit(dateBegin, dateEnd, paraM); 
 % 后面没有再用到现货利润数据了，只是前期画图用
+% 准确的说getSpotPrice应该取名叫getWindData
+
 % @12.4 这里获取现货数据，先都填充为日度fillToDaily，再计算周环比或者年同比等getWoW getYoY；
-productionPPYoY = getSpotPrice('S0027180', 20130302, dateEnd, 'ProductYoYPP', 'mean'); % PP开工率当月同比
+productionPPYoY = getSpotPrice('S0027180', 20130201, dateEnd, 'ProductYoYPP', 'mean'); % PP开工率当月同比
 productionPPYoY = fillToDaily(productionPPYoY, totalDate, 1); % 填充为日度数据，滞后调整1个工作日
 % productionPPYoY 已经是同比数据，不需要再计算增长率
+% Wind这个产量数据是月度的，4月底公布4月份的产量数据，那其实productionPPYoY滞后很严重！
+% 但为什么日度的PP开工率与PP Fut Price相关性很低，反而不如这个严重滞后的产量数据？
 
-harborStoreMA = getSpotPrice('S5436526,S5436527', 20130302, dateEnd, 'HarborStoreMA', 'sum'); % MA港口库存
+
+% @12.7 PP 开工率的日度数据（卓创资讯，东证期货），跟期货价格的相关性很低。。但感觉应该有用啊
+
+% @12.10 加入进口量构造总供应量
+% 产量和进口量都用当月数值，再计算当月同比或环比
+% 月度数据频率会不会太低了？
+% 国内产量：
+% productionDom = getSpotPrice('S0027179', 20130201, dateEnd, 'ProductionDom', 'mean');
+% % 产量要先做一个特殊处理，2014年之后2月份一般没有当月值，如果公布了当月值其实是1、2月份累计，需要额外处理一下
+% % 2016.02.29公布的数据是两个月合计，历史数据只有这一天是异常的，先手动处理一下...
+% productionDom(productionDom.Date == 20160229, 'ProductionDom') = table(NaN);
+% productionDom = fillToDaily(productionDom, totalDate, 1);
+% 
+% % 进口量：
+% % 大商所PP对应的交割标的是窄带类均聚聚丙烯,203年以来均聚级和共聚级的进口数量趋势还挺不一样的，且数量级相差和很大，基本都是均聚级，其实用总数或者均聚趋势基本完全一样
+% importation = getSpotPrice('S5401023', 20130201, dateEnd, 'Importation', 'mean'); % 万吨
+% importation = fillToDaily(importation, totalDate, 1);
+% supplyPP = outerjoin(productionDom, importation, 'type', 'left', 'Mergekeys', true);
+% supplyPP.SupplyPP = supplyPP.ProductionDom + supplyPP.Importation;
+% supplyPP = supplyPP(:, [1, 4]);
+% 
+% supplyPP = getYoY(supplyPP, 'daily'); % 月度数据应该有一个月度环比的函数
+
+
+harborStoreMA = getSpotPrice('S5436526,S5436527', 20130201, dateEnd, 'HarborStoreMA', 'sum'); % MA港口库存
 %2018.11.30 这里MA港口库存再加一个变量是进口数量，加起来作为甲醇供给量（变量到底怎么选，再研究一下）
 %@2018.12.3harborStoreMA 改为周度环比增长率
 harborStoreMA = fillToDaily(harborStoreMA, totalDate, 1);
@@ -68,15 +103,15 @@ harborStoreMA = getWoW(harborStoreMA, 'daily');
 harborStoreMA = table(harborStoreMA.Date, harborStoreMA.WoW, 'VariableNames', {'Date', 'HarborStoreMA'});
 
 % 读取宏观PMI
-pmi = getSpotPrice('M0017126', 20130302, dateEnd, 'PMI', 'mean');
+pmi = getSpotPrice('M0017126', 20130201, dateEnd, 'PMI', 'mean');
 pmi = fillToDaily(pmi, totalDate, 1);
 % pmi指数一般当月月底国家统计局就公布，不知道Wind收录会不会滞后，假定滞后1个交易日
-% 
+
 
 % get impMAPrice，美元计价，需乘以汇率
 % 先填充为日度数据，这个价格数据不需要滞后，一般当天收盘可拿到
-impMAPrice = getSpotPrice('S5416976', 20130302, dateEnd, 'ImpMAPrice', 'mean');  % MA进口价格:美元
-exUSDCNY = getSpotPrice('M0000185', 20130302, dateEnd, 'USDCNY', 'mean');
+impMAPrice = getSpotPrice('S5416976', 20130201, dateEnd, 'ImpMAPrice', 'mean');  % MA进口价格:美元
+exUSDCNY = getSpotPrice('M0000185', 20130201, dateEnd, 'USDCNY', 'mean');
 impMAPrice = outerjoin(impMAPrice, exUSDCNY, 'type', 'left', 'MergeKeys', true);
 impMAPrice.USDCNY = fillmissing(impMAPrice.USDCNY, 'previous');
 impMAPrice.ImpMAPrice = impMAPrice.ImpMAPrice .* impMAPrice.USDCNY;
@@ -101,8 +136,10 @@ spotData = outerjoin(spotData, pmi, 'type', 'left', 'MergeKeys', true);
 % spotData.ImpMAPrice = fillmissing(spotData.ImpMAPrice, 'previous');
 % spotData.PMI = fillmissing(spotData.PMI, 'previous');
 
-% 剔除缺失值
-spotData = spotData(all(~isnan(table2array(spotData)), 2), :);
+% 剔除缺失值 
+% @12.6 好像没有必要剔除缺失值？最开始有的缺失有的不确实的其实可以不剔
+% 只是恰好因为PP品种上市在2014年2月，前面2013年的都剔了没关系，本来也没用，如果不是这样的话不应该剔，不完整的现货数据也是可以用的
+% spotData = spotData(all(~isnan(table2array(spotData)), 2), :);
 
 % spotData = spotData(spotData.Date >= dateBegin & spotData.Date <= dateEnd, :);
 
@@ -181,10 +218,21 @@ for i_pair = 1:size(fut_variety,1)
         %         tstData = vertcat(tstData, resSignal(resSignal.Date >= c_stD & resSignal.Date <= c_edD, :));
         spread = outerjoin(spread, spotData, 'type', 'left', 'MergeKeys', true);
         
-        realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(1 : paraM.lagDays, 5:8)));
+        realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(:, 5:8)));
+%         realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(1 : paraM.lagDays, 5:8)));
+        % realSpread做处理，处理逻辑：初始值用第一天中枢，往下直到遇到第一个连续10天的作为新中枢
+        % originalKey 取上一个合约在今天时候的中枢（上市第一个合约就用第一个值）
+        % 用c = 1作为是不是初始合约，分段交叉验证也都是从初始开始
+        if c == 1 
+            originalKey = realSpread(1);
+        else
+            originalKey = lastRealSpread(lastRealSpread.Date == spread.Date(1), 2).RealSpread;
+        end
+        realSpread = realSTransform(realSpread, originalKey, paraM.continuousDay);
+        
         % rowfun输入的function参数必须一一对应，不能括号里显示只有一个参数，实际输入有两列，不行
-        keySpread = mode(realSpread); % 取前paraM.lagDays天给出利润中枢的众数作为接下来的base中枢
-        realSpread = [nan(paraM.lagDays, 1); ones(size(spread, 1) - paraM.lagDays, 1) .* keySpread];
+%         keySpread = mode(realSpread); % 取前paraM.lagDays天给出利润中枢的众数作为接下来的base中枢
+%         realSpread = [nan(paraM.lagDays, 1); ones(size(spread, 1) - paraM.lagDays, 1) .* keySpread];
         realSpread = table(spread.Date, realSpread, 'VariableNames', {'Date', 'RealSpread'});
         [sigOpen, sigClose, resSignal] = getSignal(data1, data2, realSpread, paraM);
         sig = [sigOpen,sigClose];
@@ -250,6 +298,9 @@ for i_pair = 1:size(fut_variety,1)
         fromIdx = find(res.Date == c_stD);
         endIdx = find(res.Date == c_edD);
         res((fromIdx : endIdx), :) = resI(resI.Date >= c_stD & resI.Date <= c_edD, :);
+        
+        lastRealSpread = realSpread;
+        clear realSpread
     end
     
     
@@ -293,7 +344,7 @@ TradePara.PType = 'open'; %交易价格，一般用open（开盘价）或者avg(日均价）
 
 [BacktestResult,err] = CTABacktest_GeneralPlatform_3(targetPortfolio,TradePara);
 
-% subplot(2, 3, iTest)
+% % subplot(2, 3, iTest)
 figure
 % 净值曲线
 dn = datenum(num2str(BacktestResult.nv(:, 1)), 'yyyymmdd');
