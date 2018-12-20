@@ -60,7 +60,8 @@ for i_fut = 1:length(fut_variety)
     % 生成所需格式的数据
     % 要将交易数据、信号数据、持仓数据的起止日期对齐
     % 交易数据
-    load(['E:\Repository\arbitrage_base_general\backtestData\', fut, '.mat'])
+    btDataPath = evalin('base', 'btDataPath');
+    load([btDataPath, fut, '.mat'])
 %     load(['E:\Repository\hedge\backtestData\', TradePara.strategyType, '\', fut, '.mat'])
 %     load([futDataPath,'\',fut,'.mat'])
     tradeData = getTradeData(futureData,signalDate(1),signalDate(end),PType);

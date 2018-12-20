@@ -9,41 +9,64 @@ addpath public newSystem3.0\gen_for_BT2 newSystem3.0 usual_function
 % @2018.12.17自变量要提前一天，用今天的自变量去预测明天的中枢
 
 % @2018.12.17另外可以人工贴标签，自动训练模型参数，人工调超参数
+% @2018.12.18人工贴利润中枢上移，下移，或者不动的标签可靠吗？其实是可以的，因为事后回过头来看，大家都知道变了
+% 关键是事前准确判断接下来会变，那有了事后的标签和事前的自变量，我们可以训练模型去做这个判断
+% 那现在还有个问题就是，自变量和因变量的时间错位窗口怎么定
+% @2018.12.19放弃现货数据做自变量的模型，现货数据根本不影响利润中枢，那制作宏观条件的话，数据点就很少，根本用不上模型
 
 % PP开工率同比； 甲醇港口库存每周四更新；甲醇中国主港现货价每天更新(甲醇价格在下午5点还没更新)；
+
+%% 数据参数
+if_reverse = true; % 默认输入的fut_variety = {'J','JM'}按照成品-原料的顺序，
+% 如果\\Cj-lmxue-dt\期货数据2.0\pairData的数据也是按照成品-原料的顺序，则if_reverse = FALSE
+% 否则，if_reverse = TRUE，输入fut_variety后，读取数据的地址要把品种名称倒一下
+% J-JM是false， PP-MA是true
+
+% 回测数据地址
+% J-JM 地址
+% btDataPath = 'E:\Repository\hedge\backtestData\strategyPCA\'; % backtestDataPath 每个品种对的回测数据地址不一样
+% PP-MA 地址
+btDataPath = 'E:\Repository\arbitrage_base_general\backtestData\';
+
+% 品种
+fut_variety = {'PP','MA'};
+% 利润中枢
+profitPivot = 500; % PP-MA暂取500， J-JM暂取-800
+
 %% 交易参数
 paraM.rate = 1 / 3; %%这个rate一定要注意。。不要随便改成1.35！改的话calOpenHands一定要跟着改！！每次结果要检查一下手数比对不对！！
 paraM.fixedExpense = 800;
-paraM.continuousDay = 10;
+% paraM.continuousDay = 10;
 % PP/MA 手数 = 1 / 1.5
 
-% testRes = nan(13, 21);
+% testRes = nan(13, 9);
 % % testRegressR2 = nan(3, 50);
-% seq = [20130201 20170929;...
-%     20140101 20141231;...
-%     20150101 20151231;...
-%     20160101 20161230;...
-%     20170101 20170929];
-% seq = -340 : 5 : -240;
-% for iTest = 1 : 21
+% % seq = [20130201 20170929;...
+% %     20140101 20141231;...
+% %     20150101 20151231;...
+% %     20160101 20161230;...
+% %     20170101 20170929];
+% seq = 500 : 20 : 660;
+% for iTest = 1 : 9
 
+% dateBegin 到 dateEnd是训练集和验证集
 dateBegin = 20130201;
-dateEnd = 20170929;
+dateEnd = 20170630;
 % dateBegin = seq(iTest, 1); % 训练
 % dateEnd = seq(iTest, 2); % 训练 % c_edD必须是交易日，不然totaldate里面定位不到
 % dateBegin = 20170701; % 验证
 % dateEnd = 20180330; % 验证
 % dateBegin = 20180101; % 测试
 % dateEnd = 20181029; % 测试
-   
-    
+
+
 %%%%%%%%%%%%%%%%3个关键参数：%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % paraM.proportion = 0.98; % MA与预测利润加权平均，MA所占的比例
 % paraM.xMA = 12; % MA天数
-paraM.hgChg = -300; % -340~-240结果都还可以, -260效果最好，但是不确定是否稳定
+% paraM.hgChg = -300; % -340~-240结果都还可以, -260效果最好，但是不确定是否稳定
 % 宏观条件变化应有上浮和下浮两种情况啊（上有顶，下有底）
-paraM.interval = 1100; % 测试700~1400OK，1020~1160效果最好，
-paraM.lagDays = 30; % 24-32效果最好，暂定取30;多种方式测下来，每一种30都表现比较好
+paraM.interval = 550; % J-JM暂取100， PP-MA暂取500
+% paraM.lagDays = 30; % 2018.12.18修改lagDays的含义，当前lagDays表示解释变量相对于被解释变量的提前天数
 %%%%%%%%%%%%%%%%3个关键参数 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 lossRatio = 0.5; % 止损上限
 
@@ -56,79 +79,79 @@ totalDate = Tdays(Tdays(:, 1) <= dateEnd, 1); % 分段测试用，避免前面有空值
 
 %% 模拟现货利润数据
 
-w = windmatlab;
+% w = windmatlab;
 % 现货利润数据搞一个函数，其中各序列价格设为子函数，最终输出现货利润Y序列 现货利润数据在模型没用，只是画出来看看
-% profit = getSpotProfit(dateBegin, dateEnd, paraM); 
+% profit = getSpotProfit(dateBegin, dateEnd, paraM);
 % 后面没有再用到现货利润数据了，只是前期画图用
 % 准确的说getSpotPrice应该取名叫getWindData
 
-% @12.4 这里获取现货数据，先都填充为日度fillToDaily，再计算周环比或者年同比等getWoW getYoY；
-productionPPYoY = getSpotPrice('S0027180', 20130201, dateEnd, 'ProductYoYPP', 'mean'); % PP开工率当月同比
-productionPPYoY = fillToDaily(productionPPYoY, totalDate, 1); % 填充为日度数据，滞后调整1个工作日
-% productionPPYoY 已经是同比数据，不需要再计算增长率
-% Wind这个产量数据是月度的，4月底公布4月份的产量数据，那其实productionPPYoY滞后很严重！
-% 但为什么日度的PP开工率与PP Fut Price相关性很低，反而不如这个严重滞后的产量数据？
-
-
-% @12.7 PP 开工率的日度数据（卓创资讯，东证期货），跟期货价格的相关性很低。。但感觉应该有用啊
-
-% @12.10 加入进口量构造总供应量
-% 产量和进口量都用当月数值，再计算当月同比或环比
-% 月度数据频率会不会太低了？
-% 国内产量：
-% productionDom = getSpotPrice('S0027179', 20130201, dateEnd, 'ProductionDom', 'mean');
-% % 产量要先做一个特殊处理，2014年之后2月份一般没有当月值，如果公布了当月值其实是1、2月份累计，需要额外处理一下
-% % 2016.02.29公布的数据是两个月合计，历史数据只有这一天是异常的，先手动处理一下...
-% productionDom(productionDom.Date == 20160229, 'ProductionDom') = table(NaN);
-% productionDom = fillToDaily(productionDom, totalDate, 1);
-% 
-% % 进口量：
-% % 大商所PP对应的交割标的是窄带类均聚聚丙烯,203年以来均聚级和共聚级的进口数量趋势还挺不一样的，且数量级相差和很大，基本都是均聚级，其实用总数或者均聚趋势基本完全一样
-% importation = getSpotPrice('S5401023', 20130201, dateEnd, 'Importation', 'mean'); % 万吨
-% importation = fillToDaily(importation, totalDate, 1);
-% supplyPP = outerjoin(productionDom, importation, 'type', 'left', 'Mergekeys', true);
-% supplyPP.SupplyPP = supplyPP.ProductionDom + supplyPP.Importation;
-% supplyPP = supplyPP(:, [1, 4]);
-% 
-% supplyPP = getYoY(supplyPP, 'daily'); % 月度数据应该有一个月度环比的函数
-
-
-harborStoreMA = getSpotPrice('S5436526,S5436527', 20130201, dateEnd, 'HarborStoreMA', 'sum'); % MA港口库存
-%2018.11.30 这里MA港口库存再加一个变量是进口数量，加起来作为甲醇供给量（变量到底怎么选，再研究一下）
-%@2018.12.3harborStoreMA 改为周度环比增长率
-harborStoreMA = fillToDaily(harborStoreMA, totalDate, 1);
-
-% 计算WoW或者YoY
-harborStoreMA = getWoW(harborStoreMA, 'daily');
-harborStoreMA = table(harborStoreMA.Date, harborStoreMA.WoW, 'VariableNames', {'Date', 'HarborStoreMA'});
-
-% 读取宏观PMI
-pmi = getSpotPrice('M0017126', 20130201, dateEnd, 'PMI', 'mean');
-pmi = fillToDaily(pmi, totalDate, 1);
-% pmi指数一般当月月底国家统计局就公布，不知道Wind收录会不会滞后，假定滞后1个交易日
-
-
-% get impMAPrice，美元计价，需乘以汇率
-% 先填充为日度数据，这个价格数据不需要滞后，一般当天收盘可拿到
-impMAPrice = getSpotPrice('S5416976', 20130201, dateEnd, 'ImpMAPrice', 'mean');  % MA进口价格:美元
-exUSDCNY = getSpotPrice('M0000185', 20130201, dateEnd, 'USDCNY', 'mean');
-impMAPrice = outerjoin(impMAPrice, exUSDCNY, 'type', 'left', 'MergeKeys', true);
-impMAPrice.USDCNY = fillmissing(impMAPrice.USDCNY, 'previous');
-impMAPrice.ImpMAPrice = impMAPrice.ImpMAPrice .* impMAPrice.USDCNY;
-impMAPrice.USDCNY = [];
-
-% 2018.12.6 注意，虽然impMAPrice这个数据本身就是daily的，也要做fillToDaily操作，因为它可能确实某些交易日数据
-% 相当于每个变量自己要先填补全，再汇总到一起，因为最后汇总完没有再fillmissing了，所以要保证每个变量自己是全的，不然有缺失数据会被踢掉
-impMAPrice = fillToDaily(impMAPrice, totalDate, 0);
-
-% @2018.12.3 impMAPrice先改为周度环比试一下
-impMAPrice = getWoW(impMAPrice, 'daily');
-impMAPrice = table(impMAPrice.Date, impMAPrice.WoW, 'VariableNames', {'Date', 'ImpMAPrice'});
-
-spotData = outerjoin(table(totalDate, 'VariableNames', {'Date'}), productionPPYoY, 'type', 'left', 'MergeKeys', true);
-spotData = outerjoin(spotData, harborStoreMA, 'type', 'left', 'MergeKeys', true);
-spotData = outerjoin(spotData, impMAPrice, 'type', 'left', 'MergeKeys', true);
-spotData = outerjoin(spotData, pmi, 'type', 'left', 'MergeKeys', true);
+% % @12.4 这里获取现货数据，先都填充为日度fillToDaily，再计算周环比或者年同比等getWoW getYoY；
+% productionPPYoY = getSpotPrice('S0027180', 20130201, dateEnd, 'ProductYoYPP', 'mean'); % PP开工率当月同比
+% productionPPYoY = fillToDaily(productionPPYoY, totalDate, 1); % 填充为日度数据，滞后调整1个工作日
+% % productionPPYoY 已经是同比数据，不需要再计算增长率
+% % Wind这个产量数据是月度的，4月底公布4月份的产量数据，那其实productionPPYoY滞后很严重！
+% % 但为什么日度的PP开工率与PP Fut Price相关性很低，反而不如这个严重滞后的产量数据？
+%
+%
+% % @12.7 PP 开工率的日度数据（卓创资讯，东证期货），跟期货价格的相关性很低。。但感觉应该有用啊
+%
+% % @12.10 加入进口量构造总供应量
+% % 产量和进口量都用当月数值，再计算当月同比或环比
+% % 月度数据频率会不会太低了？
+% % 国内产量：
+% % productionDom = getSpotPrice('S0027179', 20130201, dateEnd, 'ProductionDom', 'mean');
+% % % 产量要先做一个特殊处理，2014年之后2月份一般没有当月值，如果公布了当月值其实是1、2月份累计，需要额外处理一下
+% % % 2016.02.29公布的数据是两个月合计，历史数据只有这一天是异常的，先手动处理一下...
+% % productionDom(productionDom.Date == 20160229, 'ProductionDom') = table(NaN);
+% % productionDom = fillToDaily(productionDom, totalDate, 1);
+% %
+% % % 进口量：
+% % % 大商所PP对应的交割标的是窄带类均聚聚丙烯,203年以来均聚级和共聚级的进口数量趋势还挺不一样的，且数量级相差和很大，基本都是均聚级，其实用总数或者均聚趋势基本完全一样
+% % importation = getSpotPrice('S5401023', 20130201, dateEnd, 'Importation', 'mean'); % 万吨
+% % importation = fillToDaily(importation, totalDate, 1);
+% % supplyPP = outerjoin(productionDom, importation, 'type', 'left', 'Mergekeys', true);
+% % supplyPP.SupplyPP = supplyPP.ProductionDom + supplyPP.Importation;
+% % supplyPP = supplyPP(:, [1, 4]);
+% %
+% % supplyPP = getYoY(supplyPP, 'daily'); % 月度数据应该有一个月度环比的函数
+%
+%
+% harborStoreMA = getSpotPrice('S5436526,S5436527', 20130201, dateEnd, 'HarborStoreMA', 'sum'); % MA港口库存
+% %2018.11.30 这里MA港口库存再加一个变量是进口数量，加起来作为甲醇供给量（变量到底怎么选，再研究一下）
+% %@2018.12.3harborStoreMA 改为周度环比增长率
+% harborStoreMA = fillToDaily(harborStoreMA, totalDate, 1);
+%
+% % 计算WoW或者YoY
+% harborStoreMA = getWoW(harborStoreMA, 'daily');
+% harborStoreMA = table(harborStoreMA.Date, harborStoreMA.WoW, 'VariableNames', {'Date', 'HarborStoreMA'});
+%
+% % 读取宏观PMI
+% pmi = getSpotPrice('M0017126', 20130201, dateEnd, 'PMI', 'mean');
+% pmi = fillToDaily(pmi, totalDate, 1);
+% % pmi指数一般当月月底国家统计局就公布，不知道Wind收录会不会滞后，假定滞后1个交易日
+%
+%
+% % get impMAPrice，美元计价，需乘以汇率
+% % 先填充为日度数据，这个价格数据不需要滞后，一般当天收盘可拿到
+% impMAPrice = getSpotPrice('S5416976', 20130201, dateEnd, 'ImpMAPrice', 'mean');  % MA进口价格:美元
+% exUSDCNY = getSpotPrice('M0000185', 20130201, dateEnd, 'USDCNY', 'mean');
+% impMAPrice = outerjoin(impMAPrice, exUSDCNY, 'type', 'left', 'MergeKeys', true);
+% impMAPrice.USDCNY = fillmissing(impMAPrice.USDCNY, 'previous');
+% impMAPrice.ImpMAPrice = impMAPrice.ImpMAPrice .* impMAPrice.USDCNY;
+% impMAPrice.USDCNY = [];
+%
+% % 2018.12.6 注意，虽然impMAPrice这个数据本身就是daily的，也要做fillToDaily操作，因为它可能确实某些交易日数据
+% % 相当于每个变量自己要先填补全，再汇总到一起，因为最后汇总完没有再fillmissing了，所以要保证每个变量自己是全的，不然有缺失数据会被踢掉
+% impMAPrice = fillToDaily(impMAPrice, totalDate, 0);
+%
+% % @2018.12.3 impMAPrice先改为周度环比试一下
+% impMAPrice = getWoW(impMAPrice, 'daily');
+% impMAPrice = table(impMAPrice.Date, impMAPrice.WoW, 'VariableNames', {'Date', 'ImpMAPrice'});
+%
+% spotData = outerjoin(table(totalDate, 'VariableNames', {'Date'}), productionPPYoY, 'type', 'left', 'MergeKeys', true);
+% spotData = outerjoin(spotData, harborStoreMA, 'type', 'left', 'MergeKeys', true);
+% spotData = outerjoin(spotData, impMAPrice, 'type', 'left', 'MergeKeys', true);
+% spotData = outerjoin(spotData, pmi, 'type', 'left', 'MergeKeys', true);
 
 % 每个数据自己先fillmissing了，不要等到最后，因为前面需要计算WoW或YoY
 % spotData.ProductYoYPP = fillmissing(spotData.ProductYoYPP, 'previous');
@@ -136,7 +159,7 @@ spotData = outerjoin(spotData, pmi, 'type', 'left', 'MergeKeys', true);
 % spotData.ImpMAPrice = fillmissing(spotData.ImpMAPrice, 'previous');
 % spotData.PMI = fillmissing(spotData.PMI, 'previous');
 
-% 剔除缺失值 
+% 剔除缺失值
 % @12.6 好像没有必要剔除缺失值？最开始有的缺失有的不确实的其实可以不剔
 % 只是恰好因为PP品种上市在2014年2月，前面2013年的都剔了没关系，本来也没用，如果不是这样的话不应该剔，不完整的现货数据也是可以用的
 % spotData = spotData(all(~isnan(table2array(spotData)), 2), :);
@@ -148,8 +171,7 @@ spotData = outerjoin(spotData, pmi, 'type', 'left', 'MergeKeys', true);
 %% 真实价差有时候偏向期货，现货跟着期货走，有时候偏向现货，期货调整到现货，那中间位置的均值就是一个比较中性的状态，先试试看
 
 % 获取期货价格数据
-% 品种
-fut_variety = {'PP','MA'};
+
 % 信号相关
 signalName = 'CTA1';
 signalID = 101;
@@ -181,13 +203,22 @@ proAsset = oriAsset;
 for i_pair = 1:size(fut_variety,1)
     pFut1 = fut_variety{i_pair,1};
     pFut2 = fut_variety{i_pair,2};
-    dataPath = [sigDPath,'\',pFut2,'_',pFut1];
+    if if_reverse == false
+        dataPath = [sigDPath,'\',pFut1,'_',pFut2];
+    else
+        dataPath = [sigDPath,'\',pFut2,'_',pFut1];
+    end
     % 合约乘数
     contM1 = cont_multi{ismember(cont_multi(:,1),pFut1),2};
     contM2 = cont_multi{ismember(cont_multi(:,1),pFut2),2};
     
     % 导入换月日数据
-    load(['\\Cj-lmxue-dt\期货数据2.0\code2.0\data20_pair_data\chgInfo\',pFut2,'_',pFut1,'.mat'])
+    if if_reverse == false
+        load(['\\Cj-lmxue-dt\期货数据2.0\code2.0\data20_pair_data\chgInfo\',pFut1,'_',pFut2,'.mat'])
+    else
+        load(['\\Cj-lmxue-dt\期货数据2.0\code2.0\data20_pair_data\chgInfo\',pFut2,'_',pFut1,'.mat'])
+        
+    end
     chgInfo = chgInfo(chgInfo.date>stDate & chgInfo.date<=edDate,:);
     
     % 生成信号-按合约循环
@@ -205,8 +236,19 @@ for i_pair = 1:size(fut_variety,1)
         else %最后一段
             c_edD = totaldate(find(totaldate==edDate)-1);
         end
-        cont1 = regexp(chgInfo{c,3}{1},'\w*(?=\.)','match'); % 成品
-        cont2 = regexp(chgInfo{c,2}{1},'\w*(?=\.)','match'); % 原料
+        
+        if if_reverse == false
+            contNum1 = 2;
+            contNum2 = 3;
+        else
+            contNum1 = 3;
+            contNum2 = 2;
+        end
+        
+        cont1 = regexp(chgInfo{c,contNum1}{1},'\w*(?=\.)','match'); % 成品
+        cont2 = regexp(chgInfo{c,contNum2}{1},'\w*(?=\.)','match'); % 原料
+        clear contNum1 contNum2
+        
         % 导入数据
         data1 = getData([dataPath,'\',pFut1,'\',cont1{1},'.mat'],edDate);
         data2 = getData([dataPath,'\',pFut2,'\',cont2{1},'.mat'],edDate);
@@ -216,23 +258,25 @@ for i_pair = 1:size(fut_variety,1)
         spread = outerjoin(spreadData1, spreadData2, 'type', 'left', 'MergeKeys', true);
         spread.Spread = spread.Close1 - 1 / paraM.rate * spread.Close2 - paraM.fixedExpense;
         %         tstData = vertcat(tstData, resSignal(resSignal.Date >= c_stD & resSignal.Date <= c_edD, :));
-        spread = outerjoin(spread, spotData, 'type', 'left', 'MergeKeys', true);
-        
-        realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(:, 5:8)));
-%         realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(1 : paraM.lagDays, 5:8)));
+        %         spread = outerjoin(spread, spotData, 'type', 'left', 'MergeKeys', true);
+        %
+        %         realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(:, 5:8)));
+        %         realSpread = table2array(rowfun(@(x, y, z, hg) getRealSpread(x, y, z, hg), spread(1 : paraM.lagDays, 5:8)));
         % realSpread做处理，处理逻辑：初始值用第一天中枢，往下直到遇到第一个连续10天的作为新中枢
         % originalKey 取上一个合约在今天时候的中枢（上市第一个合约就用第一个值）
         % 用c = 1作为是不是初始合约，分段交叉验证也都是从初始开始
-        if c == 1 
-            originalKey = realSpread(1);
-        else
-            originalKey = lastRealSpread(lastRealSpread.Date == spread.Date(1), 2).RealSpread;
-        end
-        realSpread = realSTransform(realSpread, originalKey, paraM.continuousDay);
+        %         if c == 1
+        %             originalKey = realSpread(1);
+        %         else
+        %             originalKey = lastRealSpread(lastRealSpread.Date == spread.Date(1), 2).RealSpread;
+        %         end
+        %         realSpread = realSTransform(realSpread, originalKey, paraM.continuousDay);
+        
+        realSpread = ones(size(spread, 1), 1) * profitPivot;
         
         % rowfun输入的function参数必须一一对应，不能括号里显示只有一个参数，实际输入有两列，不行
-%         keySpread = mode(realSpread); % 取前paraM.lagDays天给出利润中枢的众数作为接下来的base中枢
-%         realSpread = [nan(paraM.lagDays, 1); ones(size(spread, 1) - paraM.lagDays, 1) .* keySpread];
+        %         keySpread = mode(realSpread); % 取前paraM.lagDays天给出利润中枢的众数作为接下来的base中枢
+        %         realSpread = [nan(paraM.lagDays, 1); ones(size(spread, 1) - paraM.lagDays, 1) .* keySpread];
         realSpread = table(spread.Date, realSpread, 'VariableNames', {'Date', 'RealSpread'});
         [sigOpen, sigClose, resSignal] = getSignal(data1, data2, realSpread, paraM);
         sig = [sigOpen,sigClose];
