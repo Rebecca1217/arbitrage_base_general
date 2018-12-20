@@ -8,3 +8,4 @@ arbitrage_base strategy using fundamental methods, written in a general variable
 - @2018.12.4 add macro variable to the top of decision tree.
 - @2018.12.4 should rewrite the decision tree to a parallel variables, decide, and vote form. Because you can't decide which variable most important and should be in the first place of the tree(correlation is not good enough to be precise and stable).
 - @2018.12.6 rewite the getRealSpread function using parallel variables with voting method. And add spotdata delaying. With no futher parameter tuning, it works until now. Next should examine the logic and make sure it's right, then add more useful variable and tune paras.
+- @2018.12.20 deprecate the spot data as X to forecast the profitPivot because these factors only affects short-term price variation not the long-term industry profit.
